@@ -1,0 +1,2 @@
+# application/ — use cases do modulo trip (solicitar corrida, aceitar, finalizar...).
+# O matching burro (primeiro motorista livre, sincrono, in-memory) entra aqui.
