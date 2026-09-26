@@ -1,2 +1,0 @@
-# application/ — use cases / servicos de aplicacao do modulo identity.
-# Orquestram aggregates e portas; sem regra de dominio pura (essa fica em domain/).

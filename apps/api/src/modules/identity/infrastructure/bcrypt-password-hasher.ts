@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import { PasswordHasher } from '../application/ports/password-hasher';
@@ -14,11 +15,16 @@ import { PasswordHasher } from '../application/ports/password-hasher';
 export class BcryptPasswordHasher implements PasswordHasher {
   private readonly rounds = 10;
 
+  // Hash de um valor aleatorio, gerado uma vez por processo. Quando a conta nao
+  // existe, comparamos contra ele: mesmo custo de CPU, resultado sempre false.
+  private readonly dummyHash = bcrypt.hashSync(randomUUID(), this.rounds);
+
   hash(plain: string): Promise<string> {
     return bcrypt.hash(plain, this.rounds);
   }
 
-  compare(plain: string, hash: string): Promise<boolean> {
-    return bcrypt.compare(plain, hash);
+  async compare(plain: string, hash: string | null): Promise<boolean> {
+    const matches = await bcrypt.compare(plain, hash ?? this.dummyHash);
+    return hash !== null && matches;
   }
 }

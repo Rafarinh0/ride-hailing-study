@@ -1,21 +1,25 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Driver } from '../src/modules/identity/domain/driver';
 import { Rider } from '../src/modules/identity/domain/rider';
 import { Email } from '../src/modules/identity/domain/value-objects/email';
+import { DrizzleDriverRepository } from '../src/modules/identity/infrastructure/drizzle-driver.repository';
 import { DrizzleRiderRepository } from '../src/modules/identity/infrastructure/drizzle-rider.repository';
 import { startPostgres } from './postgres';
 
 /**
- * Integracao do repositorio contra um Postgres real. Instanciamos a classe
- * direto (new ...), sem o Nest — ela e so uma classe; o @Inject so importa quando
- * o container de DI monta o grafo.
+ * Integracao dos repositorios contra um Postgres real. Instanciamos as classes
+ * direto (new ...), sem o Nest — sao so classes; o @Inject so importa quando o
+ * container de DI monta o grafo.
  */
-describe('DrizzleRiderRepository (integracao)', () => {
+describe('Repositorios de identity (integracao)', () => {
   let pg: Awaited<ReturnType<typeof startPostgres>>;
-  let repo: DrizzleRiderRepository;
+  let riders: DrizzleRiderRepository;
+  let drivers: DrizzleDriverRepository;
 
   beforeAll(async () => {
     pg = await startPostgres();
-    repo = new DrizzleRiderRepository(pg.db);
+    riders = new DrizzleRiderRepository(pg.db);
+    drivers = new DrizzleDriverRepository(pg.db);
   }, 120_000);
 
   afterAll(async () => {
@@ -28,9 +32,9 @@ describe('DrizzleRiderRepository (integracao)', () => {
       email: Email.create('Ana@Example.com'),
       passwordHash: 'hash-fake',
     });
-    await repo.save(rider);
+    await riders.save(rider);
 
-    const found = await repo.findByEmail(Email.create('ana@example.com'));
+    const found = await riders.findByEmail(Email.create('ana@example.com'));
     expect(found).not.toBeNull();
     expect(found!.id).toBe(rider.id);
     expect(found!.name).toBe('Ana');
@@ -38,6 +42,21 @@ describe('DrizzleRiderRepository (integracao)', () => {
   });
 
   it('devolve null quando o email nao existe', async () => {
-    expect(await repo.findByEmail(Email.create('ninguem@example.com'))).toBeNull();
+    expect(await riders.findByEmail(Email.create('ninguem@example.com'))).toBeNull();
+  });
+
+  it('salva e recupera um driver', async () => {
+    const driver = Driver.register({ name: 'Bia', email: Email.create('bia@example.com'), passwordHash: 'h' });
+    await drivers.save(driver);
+    expect((await drivers.findByEmail(Email.create('bia@example.com')))!.id).toBe(driver.id);
+  });
+
+  it('o mesmo email pode ser passageiro e motorista (unicidade por papel)', async () => {
+    const email = Email.create('dupla@example.com');
+    await riders.save(Rider.register({ name: 'Caio', email, passwordHash: 'h' }));
+    await drivers.save(Driver.register({ name: 'Caio', email, passwordHash: 'h' }));
+
+    expect(await riders.findByEmail(email)).not.toBeNull();
+    expect(await drivers.findByEmail(email)).not.toBeNull();
   });
 });
