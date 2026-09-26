@@ -8,6 +8,13 @@
       "when": 1788053019865,
       "tag": "0000_light_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790219021371,
+      "tag": "0001_bright_peter_quill",
+      "breakpoints": true
     }
   ]
 }

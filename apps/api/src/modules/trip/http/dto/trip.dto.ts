@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
-// TODO(dominio): descreva os payloads das transicoes da corrida.
-export const requestTripSchema = z.object({});
+export const requestTripSchema = z.object({
+  riderId: z.string().uuid(),
+});
 export type RequestTripDto = z.infer<typeof requestTripSchema>;
+
+export const acceptTripSchema = z.object({
+  driverId: z.string().uuid(),
+});
+export type AcceptTripDto = z.infer<typeof acceptTripSchema>;
