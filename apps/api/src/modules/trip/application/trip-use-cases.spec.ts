@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { InProcessEventBus } from '../../../common/events/in-process-event-bus';
+import { UnitOfWork } from '../../../common/unit-of-work';
+import { TRIP_FINISHED, TripFinishedEvent } from '../../../contracts/trip-finished';
 import { ConcurrentTripUpdateError } from '../domain/errors';
 import { FirstAvailableStrategy } from '../domain/first-available.strategy';
+import { MatchingStrategy } from '../domain/matching-strategy';
 import { TripRepository } from '../domain/ports/trip.repository';
 import { Trip, TripSnapshot } from '../domain/trip';
 import { TripStatus } from '../domain/trip-status';
@@ -36,15 +40,23 @@ class InMemoryTripRepository implements TripRepository {
   }
 }
 
+// Sem banco nao ha transacao de verdade: o rollback e testado na integracao.
+const noTransaction: UnitOfWork = { run: (work) => work() };
+
 describe('TripUseCases (matching)', () => {
   let trips: InMemoryTripRepository;
   let availability: InMemoryDriverAvailability;
+  let events: InProcessEventBus;
   let useCases: TripUseCases;
+
+  const build = (avail: InMemoryDriverAvailability, strategy: MatchingStrategy = new FirstAvailableStrategy()) =>
+    new TripUseCases(trips, avail, strategy, noTransaction, events);
 
   beforeEach(() => {
     trips = new InMemoryTripRepository();
     availability = new InMemoryDriverAvailability();
-    useCases = new TripUseCases(trips, availability, new FirstAvailableStrategy());
+    events = new InProcessEventBus();
+    useCases = build(availability);
   });
 
   it('pedido com motorista livre ja sai aceito, com o primeiro da fila', async () => {
@@ -91,6 +103,33 @@ describe('TripUseCases (matching)', () => {
     expect(await availability.listAvailable()).toEqual(['d1']);
   });
 
+  it('finalizar publica trip.finished com os dados da corrida', async () => {
+    const published: TripFinishedEvent[] = [];
+    events.subscribe<TripFinishedEvent>(TRIP_FINISHED, async (e) => {
+      published.push(e);
+    });
+    await availability.goOnline('d1');
+    const trip = await useCases.request(RIDER);
+    await useCases.start(trip.id);
+    await useCases.finish(trip.id);
+
+    expect(published).toHaveLength(1);
+    expect(published[0]).toMatchObject({ type: TRIP_FINISHED, tripId: trip.id, riderId: RIDER, driverId: 'd1' });
+    expect(published[0].finishedAt.getTime()).toBeGreaterThanOrEqual(published[0].startedAt.getTime());
+  });
+
+  it('se o tratamento do trip.finished falhar, o erro sobe e o motorista nao e liberado', async () => {
+    events.subscribe(TRIP_FINISHED, async () => {
+      throw new Error('cobranca falhou');
+    });
+    await availability.goOnline('d1');
+    const trip = await useCases.request(RIDER);
+    await useCases.start(trip.id);
+
+    await expect(useCases.finish(trip.id)).rejects.toThrow('cobranca falhou');
+    expect(await availability.listAvailable()).toEqual([]);
+  });
+
   it('cancelar devolve o motorista para a fila', async () => {
     await availability.goOnline('d1');
     const trip = await useCases.request(RIDER);
@@ -126,7 +165,7 @@ describe('TripUseCases (matching)', () => {
 
     // Reinicio: a memoria some, o repositorio (banco) continua.
     availability = new InMemoryDriverAvailability();
-    useCases = new TripUseCases(trips, availability, new FirstAvailableStrategy());
+    useCases = build(availability);
     await availability.goOnline('d1');
     const current = await useCases.request(RIDER);
     expect(current.driverId).toBe('d1');
@@ -139,7 +178,7 @@ describe('TripUseCases (matching)', () => {
 
   it('estrategia que devolve id fora da lista nao trava o pedido', async () => {
     await availability.goOnline('d1');
-    const ghost = new TripUseCases(trips, availability, { choose: () => 'fantasma' });
+    const ghost = build(availability, { choose: () => 'fantasma' });
 
     const trip = await ghost.request(RIDER);
 

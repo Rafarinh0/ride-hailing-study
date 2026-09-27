@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { DRIZZLE, Database } from '../../../database/drizzle.provider';
+import { Executor, executorOf } from '../../../database/transaction';
 import { TripRepository } from '../domain/ports/trip.repository';
 import { Trip } from '../domain/trip';
 import { TripStatus } from '../domain/trip-status';
@@ -12,7 +13,12 @@ import { trips } from './schema';
  */
 @Injectable()
 export class DrizzleTripRepository implements TripRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(@Inject(DRIZZLE) private readonly root: Database) {}
+
+  // A transacao aberta (ex.: o finish), se houver; senao o banco direto.
+  private get db(): Executor {
+    return executorOf(this.root);
+  }
 
   async save(trip: Trip): Promise<void> {
     const { id, ...changes } = trip.toSnapshot();

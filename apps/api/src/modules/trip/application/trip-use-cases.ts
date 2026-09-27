@@ -1,4 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { EVENT_BUS, EventBus } from '../../../common/events/event-bus';
+import { UNIT_OF_WORK, UnitOfWork } from '../../../common/unit-of-work';
+import { TRIP_FINISHED, TripFinishedEvent } from '../../../contracts/trip-finished';
 import { ConcurrentTripUpdateError, InvalidTripTransitionError, TripNotFoundError } from '../domain/errors';
 import { MATCHING_STRATEGY, MatchingStrategy } from '../domain/matching-strategy';
 import { TRIP_REPOSITORY, TripRepository } from '../domain/ports/trip.repository';
@@ -17,6 +20,8 @@ export class TripUseCases {
     @Inject(TRIP_REPOSITORY) private readonly trips: TripRepository,
     @Inject(DRIVER_AVAILABILITY) private readonly availability: DriverAvailability,
     @Inject(MATCHING_STRATEGY) private readonly strategy: MatchingStrategy,
+    @Inject(UNIT_OF_WORK) private readonly uow: UnitOfWork,
+    @Inject(EVENT_BUS) private readonly events: EventBus,
   ) {}
 
   /**
@@ -48,8 +53,19 @@ export class TripUseCases {
     return this.apply(id, (trip) => trip.start());
   }
 
+  /**
+   * Finalizar e cobrar sao uma coisa so. Na mesma transacao: grava a corrida e publica
+   * trip.finished, que o payment trata ali dentro (grava cobranca + ledger). Se a
+   * cobranca falhar, o rollback desfaz tudo e a corrida continua em curso.
+   */
   async finish(id: string): Promise<TripSnapshot> {
-    const trip = await this.apply(id, (t) => t.finish());
+    const trip = await this.uow.run(async () => {
+      const finished = await this.apply(id, (t) => t.finish());
+      await this.events.publish(toTripFinished(finished));
+      return finished;
+    });
+    // A memoria nao participa da transacao: liberar o motorista antes do commit o
+    // deixaria solto se houvesse rollback. Por isso, so depois.
     await this.freeDriver(trip);
     return trip;
   }
@@ -144,4 +160,16 @@ export class TripUseCases {
     }
     return trip;
   }
+}
+
+function toTripFinished(trip: TripSnapshot): TripFinishedEvent {
+  // Finalizada implica aceita e iniciada: a maquina de estados garante esses campos.
+  return {
+    type: TRIP_FINISHED,
+    tripId: trip.id,
+    riderId: trip.riderId,
+    driverId: trip.driverId!,
+    startedAt: trip.startedAt!,
+    finishedAt: trip.finishedAt!,
+  };
 }
