@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ConcurrentTripUpdateError } from '../domain/errors';
 import { FirstAvailableStrategy } from '../domain/first-available.strategy';
 import { TripRepository } from '../domain/ports/trip.repository';
 import { Trip, TripSnapshot } from '../domain/trip';
+import { TripStatus } from '../domain/trip-status';
 import { InMemoryDriverAvailability } from '../infrastructure/in-memory-driver-availability';
 import { TripUseCases } from './trip-use-cases';
 
@@ -18,6 +20,14 @@ class InMemoryTripRepository implements TripRepository {
       throw new Error('banco fora do ar');
     }
     this.rows.set(trip.id, trip.toSnapshot());
+  }
+
+  async saveIfStatus(trip: Trip, expected: TripStatus): Promise<boolean> {
+    if (this.rows.get(trip.id)?.status !== expected) {
+      return false;
+    }
+    this.rows.set(trip.id, trip.toSnapshot());
+    return true;
   }
 
   async findById(id: string): Promise<Trip | null> {
@@ -54,6 +64,16 @@ describe('TripUseCases (matching)', () => {
     expect(trip.driverId).toBeNull();
   });
 
+  it('match tenta de novo quando um motorista fica online depois', async () => {
+    const trip = await useCases.request(RIDER);
+    await availability.goOnline('d1');
+
+    const matched = await useCases.match(trip.id);
+
+    expect(matched.status).toBe('accepted');
+    expect(matched.driverId).toBe('d1');
+  });
+
   it('dois pedidos simultaneos com um motorista: so um leva', async () => {
     await availability.goOnline('d1');
 
@@ -85,5 +105,44 @@ describe('TripUseCases (matching)', () => {
 
     await expect(useCases.request(RIDER)).rejects.toThrow('banco fora do ar');
     expect(await availability.listAvailable()).toEqual(['d1']);
+  });
+
+  it('start e cancel simultaneos: um perde com conflito e o motorista nao e solto no meio da corrida', async () => {
+    await availability.goOnline('d1');
+    const trip = await useCases.request(RIDER);
+
+    const results = await Promise.allSettled([useCases.start(trip.id), useCases.cancel(trip.id)]);
+
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConcurrentTripUpdateError);
+    const final = (await useCases.get(trip.id)).status;
+    expect(await availability.listAvailable()).toEqual(final === 'cancelled' ? ['d1'] : []);
+  });
+
+  it('finalizar uma corrida antiga nao solta o motorista que ja esta em outra (API reiniciou)', async () => {
+    await availability.goOnline('d1');
+    const old = await useCases.request(RIDER);
+
+    // Reinicio: a memoria some, o repositorio (banco) continua.
+    availability = new InMemoryDriverAvailability();
+    useCases = new TripUseCases(trips, availability, new FirstAvailableStrategy());
+    await availability.goOnline('d1');
+    const current = await useCases.request(RIDER);
+    expect(current.driverId).toBe('d1');
+
+    await useCases.start(old.id);
+    await useCases.finish(old.id);
+
+    expect(await availability.listAvailable()).toEqual([]);
+  });
+
+  it('estrategia que devolve id fora da lista nao trava o pedido', async () => {
+    await availability.goOnline('d1');
+    const ghost = new TripUseCases(trips, availability, { choose: () => 'fantasma' });
+
+    const trip = await ghost.request(RIDER);
+
+    expect(trip.status).toBe('requested');
   });
 });

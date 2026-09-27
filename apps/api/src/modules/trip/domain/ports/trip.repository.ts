@@ -1,4 +1,5 @@
 import { Trip } from '../trip';
+import { TripStatus } from '../trip-status';
 
 /**
  * Porta de persistencia da corrida. `save` cria OU atualiza (upsert): o use case
@@ -6,6 +7,11 @@ import { Trip } from '../trip';
  */
 export interface TripRepository {
   save(trip: Trip): Promise<void>;
+  /**
+   * Atualiza so se, no banco, a corrida ainda estiver em `expected` (o status lido
+   * antes da transicao). Devolve false se outra requisicao mudou antes.
+   */
+  saveIfStatus(trip: Trip, expected: TripStatus): Promise<boolean>;
   findById(id: string): Promise<Trip | null>;
 }
 

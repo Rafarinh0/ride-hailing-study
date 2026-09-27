@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { DRIZZLE, Database } from '../../../database/drizzle.provider';
 import { TripRepository } from '../domain/ports/trip.repository';
 import { Trip } from '../domain/trip';
+import { TripStatus } from '../domain/trip-status';
 import { trips } from './schema';
 
 /**
@@ -20,6 +21,18 @@ export class DrizzleTripRepository implements TripRepository {
       .insert(trips)
       .values({ id, ...changes })
       .onConflictDoUpdate({ target: trips.id, set: changes });
+  }
+
+  // Conferir e gravar num UPDATE so: o Postgres garante que duas requisicoes nao
+  // passem as duas pela condicao do WHERE.
+  async saveIfStatus(trip: Trip, expected: TripStatus): Promise<boolean> {
+    const { id, ...changes } = trip.toSnapshot();
+    const updated = await this.db
+      .update(trips)
+      .set(changes)
+      .where(and(eq(trips.id, id), eq(trips.status, expected)))
+      .returning({ id: trips.id });
+    return updated.length === 1;
   }
 
   async findById(id: string): Promise<Trip | null> {

@@ -1,5 +1,5 @@
 import { Controller, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { DriverPresence } from '../application/driver-presence';
+import { TripUseCases } from '../application/trip-use-cases';
 
 /**
  * Motorista avisa se esta disponivel. 204: a acao nao devolve conteudo.
@@ -8,17 +8,17 @@ import { DriverPresence } from '../application/driver-presence';
  */
 @Controller('drivers')
 export class DriversController {
-  constructor(private readonly presence: DriverPresence) {}
+  constructor(private readonly trips: TripUseCases) {}
 
   @Post(':id/online')
   @HttpCode(204)
   goOnline(@Param('id', ParseUUIDPipe) id: string) {
-    return this.presence.goOnline(id);
+    return this.trips.goOnline(id);
   }
 
   @Post(':id/offline')
   @HttpCode(204)
   goOffline(@Param('id', ParseUUIDPipe) id: string) {
-    return this.presence.goOffline(id);
+    return this.trips.goOffline(id);
   }
 }

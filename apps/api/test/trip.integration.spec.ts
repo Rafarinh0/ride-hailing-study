@@ -48,6 +48,21 @@ describe('DrizzleTripRepository (integracao)', () => {
     expect(() => loaded.accept(DRIVER)).toThrow();
   });
 
+  it('saveIfStatus so grava se o status no banco ainda for o esperado', async () => {
+    const trip = Trip.request(RIDER);
+    trip.accept(DRIVER);
+    await repo.save(trip);
+
+    const a = (await repo.findById(trip.id))!;
+    const b = (await repo.findById(trip.id))!;
+    a.start();
+    b.cancel();
+
+    expect(await repo.saveIfStatus(a, 'accepted')).toBe(true);
+    expect(await repo.saveIfStatus(b, 'accepted')).toBe(false);
+    expect((await repo.findById(trip.id))!.status).toBe('in_progress');
+  });
+
   it('devolve null para id inexistente', async () => {
     expect(await repo.findById('99999999-9999-4999-8999-999999999999')).toBeNull();
   });

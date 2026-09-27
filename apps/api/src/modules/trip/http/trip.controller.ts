@@ -8,7 +8,8 @@ import { RequestTripDto, requestTripSchema } from './dto/trip.dto';
  * de `status`: o cliente pede uma ACAO e o aggregate decide se ela e valida.
  *
  * Nao ha rota de "aceitar": quem atribui o motorista e o matching, dentro do
- * POST /trips. A resposta ja volta `accepted` (com driverId) ou `requested`.
+ * POST /trips. A resposta ja volta `accepted` (com driverId) ou `requested`; neste
+ * caso, POST /trips/:id/match roda o matching de novo.
  *
  * O pipe Zod vai direto no @Body porque ha @Param nas mesmas rotas: @UsePipes
  * aplicaria o Zod no id da URL tambem. Transicoes respondem 200; so o POST /trips e 201.
@@ -26,6 +27,12 @@ export class TripController {
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.trips.get(id);
+  }
+
+  @Post(':id/match')
+  @HttpCode(200)
+  match(@Param('id', ParseUUIDPipe) id: string) {
+    return this.trips.match(id);
   }
 
   @Post(':id/start')

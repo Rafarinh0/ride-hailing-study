@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { DriverAvailability } from '../application/ports/driver-availability';
 import { DriverBusyError } from '../domain/errors';
 
-type Status = 'available' | 'busy';
-
 /**
- * Disponibilidade em memoria. Um Map guarda a ordem de insercao, e essa ordem e
- * a fila de espera: quem entrou primeiro esta livre ha mais tempo.
+ * Disponibilidade em memoria, em duas estruturas:
+ *  - `available`: so os livres. Um Set guarda a ordem de insercao, e essa ordem e a
+ *    fila de espera. Listar custa o numero de LIVRES, nao o total de motoristas.
+ *  - `busy`: motorista -> corrida com que ele esta. Liberar confere a corrida.
  *
  * ponytail: memoria do processo. Some quando a API reinicia (motoristas precisam
  * ficar online de novo) e nao e compartilhada: com duas instancias da API, cada
@@ -15,39 +15,41 @@ type Status = 'available' | 'busy';
  */
 @Injectable()
 export class InMemoryDriverAvailability implements DriverAvailability {
-  private readonly drivers = new Map<string, Status>();
+  private readonly available = new Set<string>();
+  private readonly busy = new Map<string, string>();
 
   async goOnline(driverId: string): Promise<void> {
-    if (!this.drivers.has(driverId)) {
-      this.drivers.set(driverId, 'available');
+    if (!this.busy.has(driverId)) {
+      this.available.add(driverId);
     }
   }
 
   async goOffline(driverId: string): Promise<void> {
-    if (this.drivers.get(driverId) === 'busy') {
+    if (this.busy.has(driverId)) {
       throw new DriverBusyError(driverId);
     }
-    this.drivers.delete(driverId);
+    this.available.delete(driverId);
   }
 
   async listAvailable(): Promise<string[]> {
-    return [...this.drivers].filter(([, status]) => status === 'available').map(([id]) => id);
+    return [...this.available];
   }
 
   // Atomico porque nao ha nenhum `await` entre ler e escrever: o Node executa este
   // trecho inteiro sem que outra requisicao rode no meio.
-  async claim(driverId: string): Promise<boolean> {
-    if (this.drivers.get(driverId) !== 'available') {
+  async claim(driverId: string, tripId: string): Promise<boolean> {
+    if (!this.available.delete(driverId)) {
       return false;
     }
-    this.drivers.set(driverId, 'busy');
+    this.busy.set(driverId, tripId);
     return true;
   }
 
-  async release(driverId: string): Promise<void> {
-    if (this.drivers.get(driverId) === 'busy') {
-      this.drivers.delete(driverId); // apaga e reinsere: vai para o fim da fila
-      this.drivers.set(driverId, 'available');
+  async release(driverId: string, tripId: string): Promise<void> {
+    if (this.busy.get(driverId) !== tripId) {
+      return;
     }
+    this.busy.delete(driverId);
+    this.available.add(driverId); // entra no fim da fila
   }
 }

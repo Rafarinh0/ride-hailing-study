@@ -1,13 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { TripNotFoundError } from '../domain/errors';
+import { ConcurrentTripUpdateError, InvalidTripTransitionError, TripNotFoundError } from '../domain/errors';
 import { MATCHING_STRATEGY, MatchingStrategy } from '../domain/matching-strategy';
 import { TRIP_REPOSITORY, TripRepository } from '../domain/ports/trip.repository';
 import { Trip, TripSnapshot } from '../domain/trip';
+import { canTransition } from '../domain/trip-status';
 import { DRIVER_AVAILABILITY, DriverAvailability } from './ports/driver-availability';
 
 /**
- * Use cases da corrida. Toda regra de transicao mora no aggregate; aqui so se
- * orquestra: carregar, transicionar, salvar — e agora, falar com o matching.
+ * Use cases da corrida e da disponibilidade dos motoristas. Toda regra de transicao
+ * mora no aggregate; aqui so se orquestra: carregar, transicionar, gravar, e falar
+ * com o matching.
  */
 @Injectable()
 export class TripUseCases {
@@ -19,27 +21,26 @@ export class TripUseCases {
 
   /**
    * Matching sincrono: a resposta ja diz se achou motorista. Sem motorista livre,
-   * a corrida fica `requested` e ninguem tenta de novo (o "burro" do roteiro —
-   * fila e nova tentativa chegam com eventos, na Etapa 4).
+   * a corrida fica `requested`; POST /trips/:id/match tenta de novo.
    */
   async request(riderId: string): Promise<TripSnapshot> {
     const trip = Trip.request(riderId);
-    const driverId = await this.claimDriver();
-    if (driverId) {
-      trip.accept(driverId);
-    }
-
-    try {
+    await this.assignDriverAndSave(trip, async () => {
       await this.trips.save(trip);
-    } catch (error) {
-      // A corrida nao foi gravada, mas o motorista ja estava reservado para ela.
-      // Desfaz a reserva; senao ele some da fila ate ficar online de novo.
-      if (driverId) {
-        await this.availability.release(driverId);
-      }
-      throw error;
-    }
+      return true;
+    });
+    return trip.toSnapshot();
+  }
 
+  /** Nova tentativa de matching para uma corrida que ficou sem motorista. */
+  async match(id: string): Promise<TripSnapshot> {
+    const trip = await this.load(id);
+    // Confere ANTES de reservar: reservar e so depois descobrir que a corrida nao
+    // aceita motorista deixaria alguem preso a toa.
+    if (!canTransition(trip.status, 'accepted')) {
+      throw new InvalidTripTransitionError(trip.status, 'accepted');
+    }
+    await this.assignDriverAndSave(trip, () => this.trips.saveIfStatus(trip, 'requested'));
     return trip.toSnapshot();
   }
 
@@ -63,19 +64,51 @@ export class TripUseCases {
     return (await this.load(id)).toSnapshot();
   }
 
+  goOnline(driverId: string): Promise<void> {
+    return this.availability.goOnline(driverId);
+  }
+
+  goOffline(driverId: string): Promise<void> {
+    return this.availability.goOffline(driverId);
+  }
+
+  /**
+   * Reserva um motorista (se houver) e grava. Se a gravacao falhar, ou perder para
+   * outra requisicao, desfaz a reserva; senao o motorista some da fila.
+   */
+  private async assignDriverAndSave(trip: Trip, persist: () => Promise<boolean>): Promise<void> {
+    const driverId = await this.claimDriver(trip.id);
+    if (driverId) {
+      trip.accept(driverId);
+    }
+
+    let saved = false;
+    try {
+      saved = await persist();
+    } finally {
+      if (!saved && driverId) {
+        await this.availability.release(driverId, trip.id);
+      }
+    }
+    if (!saved) {
+      throw new ConcurrentTripUpdateError(trip.id);
+    }
+  }
+
   /**
    * Escolhe (Strategy) e reserva (claim). Entre listar e reservar ha um `await`,
    * e nesse intervalo outro pedido pode ter reservado o mesmo motorista. Nesse caso
    * o claim devolve false e tentamos o proximo da lista.
    */
-  private async claimDriver(): Promise<string | null> {
+  private async claimDriver(tripId: string): Promise<string | null> {
     let candidates = await this.availability.listAvailable();
     while (candidates.length > 0) {
       const chosen = this.strategy.choose(candidates);
-      if (chosen === null) {
+      // Uma estrategia que devolve algo fora da lista nao pode prender o laco.
+      if (chosen === null || !candidates.includes(chosen)) {
         return null;
       }
-      if (await this.availability.claim(chosen)) {
+      if (await this.availability.claim(chosen, tripId)) {
         return chosen;
       }
       candidates = candidates.filter((id) => id !== chosen);
@@ -85,17 +118,22 @@ export class TripUseCases {
 
   private async freeDriver(trip: TripSnapshot): Promise<void> {
     if (trip.driverId) {
-      await this.availability.release(trip.driverId);
+      await this.availability.release(trip.driverId, trip.id);
     }
   }
 
-  // ponytail: load -> transiciona -> save sem trava. Duas requests simultaneas
-  // na mesma corrida podem ler o mesmo estado e a ultima escrita vence.
-  // Concorrencia e assunto da Etapa 4 (lock / versao otimista).
+  /**
+   * Grava so se a corrida ainda estiver no status lido (concorrencia otimista). Se
+   * outra requisicao mudou antes, esta perde com 409 e nao gera efeito colateral,
+   * como liberar o motorista de uma corrida que na verdade comecou.
+   */
   private async apply(id: string, transition: (trip: Trip) => void): Promise<TripSnapshot> {
     const trip = await this.load(id);
+    const readStatus = trip.status;
     transition(trip);
-    await this.trips.save(trip);
+    if (!(await this.trips.saveIfStatus(trip, readStatus))) {
+      throw new ConcurrentTripUpdateError(id);
+    }
     return trip.toSnapshot();
   }
 

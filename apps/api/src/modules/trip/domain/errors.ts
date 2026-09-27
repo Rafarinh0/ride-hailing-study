@@ -17,6 +17,13 @@ export class TripNotFoundError extends NotFoundError {
   }
 }
 
+/** Outra requisicao mudou a corrida entre a leitura e a gravacao desta. */
+export class ConcurrentTripUpdateError extends ConflictError {
+  constructor(id: string) {
+    super(`corrida alterada por outra requisicao: ${id}`);
+  }
+}
+
 /** Motorista em corrida nao pode ficar offline: primeiro termina a corrida. */
 export class DriverBusyError extends ConflictError {
   constructor(driverId: string) {
