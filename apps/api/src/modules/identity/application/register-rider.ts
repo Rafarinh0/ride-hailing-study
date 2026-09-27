@@ -26,8 +26,8 @@ export class RegisterRider {
 
     // Checagem amigavel pra devolver 409 com mensagem clara. NAO e a garantia
     // real de unicidade: entre este SELECT e o INSERT, outra request pode inserir
-    // (TOCTOU). A garantia de verdade e o UNIQUE na coluna email (ver schema.ts).
-    // ponytail: check-then-insert; o UNIQUE do banco e a rede de seguranca.
+    // (TOCTOU). A garantia de verdade e o UNIQUE na coluna email (ver schema.ts),
+    // e o repositorio traduz a recusa do banco nesse mesmo EmailAlreadyInUseError.
     const existing = await this.riders.findByEmail(email);
     if (existing) {
       throw new EmailAlreadyInUseError(email.value);

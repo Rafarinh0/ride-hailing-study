@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, Database } from '../../../database/drizzle.provider';
+import { isUniqueViolation } from '../../../database/postgres-errors';
 import { Driver } from '../domain/driver';
+import { EmailAlreadyInUseError } from '../domain/errors';
 import { DriverRepository } from '../domain/ports/driver.repository';
 import { Email } from '../domain/value-objects/email';
 import { drivers } from './schema';
@@ -12,13 +14,21 @@ export class DrizzleDriverRepository implements DriverRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   async save(driver: Driver): Promise<void> {
-    await this.db.insert(drivers).values({
-      id: driver.id,
-      name: driver.name,
-      email: driver.email.value,
-      passwordHash: driver.passwordHash,
-      createdAt: driver.createdAt,
-    });
+    try {
+      await this.db.insert(drivers).values({
+        id: driver.id,
+        name: driver.name,
+        email: driver.email.value,
+        passwordHash: driver.passwordHash,
+        createdAt: driver.createdAt,
+      });
+    } catch (error) {
+      // Mesmo caso do DrizzleRiderRepository: cadastro simultaneo -> 409, nao 500.
+      if (isUniqueViolation(error)) {
+        throw new EmailAlreadyInUseError(driver.email.value);
+      }
+      throw error;
+    }
   }
 
   async findByEmail(email: Email): Promise<Driver | null> {

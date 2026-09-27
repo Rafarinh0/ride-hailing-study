@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Driver } from '../src/modules/identity/domain/driver';
+import { EmailAlreadyInUseError } from '../src/modules/identity/domain/errors';
 import { Rider } from '../src/modules/identity/domain/rider';
 import { Email } from '../src/modules/identity/domain/value-objects/email';
 import { DrizzleDriverRepository } from '../src/modules/identity/infrastructure/drizzle-driver.repository';
@@ -49,6 +50,24 @@ describe('Repositorios de identity (integracao)', () => {
     const driver = Driver.register({ name: 'Bia', email: Email.create('bia@example.com'), passwordHash: 'h' });
     await drivers.save(driver);
     expect((await drivers.findByEmail(Email.create('bia@example.com')))!.id).toBe(driver.id);
+  });
+
+  // Simula o perdedor de dois cadastros simultaneos: o check do use case ja passou,
+  // e so o UNIQUE do banco segura. Tem de virar erro de dominio (409), nao 500.
+  it('rider com email repetido que passa pelo check vira EmailAlreadyInUseError', async () => {
+    const email = Email.create('repetido@example.com');
+    await riders.save(Rider.register({ name: 'A', email, passwordHash: 'h' }));
+    await expect(riders.save(Rider.register({ name: 'B', email, passwordHash: 'h' }))).rejects.toThrow(
+      EmailAlreadyInUseError,
+    );
+  });
+
+  it('driver com email repetido que passa pelo check vira EmailAlreadyInUseError', async () => {
+    const email = Email.create('repetido@example.com');
+    await drivers.save(Driver.register({ name: 'A', email, passwordHash: 'h' }));
+    await expect(drivers.save(Driver.register({ name: 'B', email, passwordHash: 'h' }))).rejects.toThrow(
+      EmailAlreadyInUseError,
+    );
   });
 
   it('o mesmo email pode ser passageiro e motorista (unicidade por papel)', async () => {
