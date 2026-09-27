@@ -70,6 +70,19 @@ describe('Repositorios de identity (integracao)', () => {
     );
   });
 
+  it('violacao de outra constraint (id repetido) nao vira EmailAlreadyInUseError', async () => {
+    const first = Rider.register({ name: 'A', email: Email.create('pk1@example.com'), passwordHash: 'h' });
+    await riders.save(first);
+    const sameId = Rider.rehydrate({
+      id: first.id,
+      name: 'B',
+      email: Email.create('pk2@example.com'),
+      passwordHash: 'h',
+      createdAt: new Date(),
+    });
+    await expect(riders.save(sameId)).rejects.not.toBeInstanceOf(EmailAlreadyInUseError);
+  });
+
   it('o mesmo email pode ser passageiro e motorista (unicidade por papel)', async () => {
     const email = Email.create('dupla@example.com');
     await riders.save(Rider.register({ name: 'Caio', email, passwordHash: 'h' }));

@@ -30,7 +30,7 @@ export class DrizzleRiderRepository implements RiderRepository {
       // Dois cadastros simultaneos passam juntos pelo findByEmail do use case; o
       // UNIQUE recusa o segundo. Traduzimos para o erro de dominio (409), senao o
       // cliente receberia 500.
-      if (isUniqueViolation(error)) {
+      if (isUniqueViolation(error, 'riders_email_unique')) {
         throw new EmailAlreadyInUseError(rider.email.value);
       }
       throw error;

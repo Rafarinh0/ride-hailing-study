@@ -24,7 +24,7 @@ export class DrizzleDriverRepository implements DriverRepository {
       });
     } catch (error) {
       // Mesmo caso do DrizzleRiderRepository: cadastro simultaneo -> 409, nao 500.
-      if (isUniqueViolation(error)) {
+      if (isUniqueViolation(error, 'drivers_email_unique')) {
         throw new EmailAlreadyInUseError(driver.email.value);
       }
       throw error;
