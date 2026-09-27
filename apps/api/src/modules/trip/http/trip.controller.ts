@@ -1,16 +1,17 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { TripUseCases } from '../application/trip-use-cases';
-import { AcceptTripDto, acceptTripSchema, RequestTripDto, requestTripSchema } from './dto/trip.dto';
+import { RequestTripDto, requestTripSchema } from './dto/trip.dto';
 
 /**
- * Cada transicao e um POST num sub-recurso (/trips/:id/accept...), nao um PATCH
- * de `status`. Um PATCH { status: 'finished' } deixaria o cliente "escolher" o
- * estado; aqui o cliente pede uma ACAO e o aggregate decide se ela e valida.
+ * Cada transicao e um POST num sub-recurso (/trips/:id/finish...), nao um PATCH
+ * de `status`: o cliente pede uma ACAO e o aggregate decide se ela e valida.
  *
- * O pipe Zod vai direto no @Body (e nao em @UsePipes, como no identity) porque
- * aqui tambem ha @Param: @UsePipes aplicaria o Zod no id da URL tambem.
- * Transicoes respondem 200 (nada novo e criado); so o POST /trips e 201.
+ * Nao ha rota de "aceitar": quem atribui o motorista e o matching, dentro do
+ * POST /trips. A resposta ja volta `accepted` (com driverId) ou `requested`.
+ *
+ * O pipe Zod vai direto no @Body porque ha @Param nas mesmas rotas: @UsePipes
+ * aplicaria o Zod no id da URL tambem. Transicoes respondem 200; so o POST /trips e 201.
  */
 @Controller('trips')
 export class TripController {
@@ -25,15 +26,6 @@ export class TripController {
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.trips.get(id);
-  }
-
-  @Post(':id/accept')
-  @HttpCode(200)
-  accept(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(acceptTripSchema)) body: AcceptTripDto,
-  ) {
-    return this.trips.accept(id, body.driverId);
   }
 
   @Post(':id/start')

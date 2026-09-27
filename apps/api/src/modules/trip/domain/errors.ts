@@ -16,3 +16,10 @@ export class TripNotFoundError extends NotFoundError {
     super(`corrida nao encontrada: ${id}`);
   }
 }
+
+/** Motorista em corrida nao pode ficar offline: primeiro termina a corrida. */
+export class DriverBusyError extends ConflictError {
+  constructor(driverId: string) {
+    super(`motorista em corrida: ${driverId}`);
+  }
+}

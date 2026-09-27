@@ -1,48 +1,97 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TripNotFoundError } from '../domain/errors';
+import { MATCHING_STRATEGY, MatchingStrategy } from '../domain/matching-strategy';
 import { TRIP_REPOSITORY, TripRepository } from '../domain/ports/trip.repository';
 import { Trip, TripSnapshot } from '../domain/trip';
+import { DRIVER_AVAILABILITY, DriverAvailability } from './ports/driver-availability';
 
 /**
- * Use cases da corrida. Uma classe so (em vez de uma por use case, como o
- * RegisterRider) porque as 4 transicoes tem o MESMO formato: carrega, aplica a
- * transicao, salva. Quatro arquivos quase identicos seriam ruido.
- *
- * Toda regra (pode ou nao transicionar) mora no aggregate. Aqui so orquestra.
+ * Use cases da corrida. Toda regra de transicao mora no aggregate; aqui so se
+ * orquestra: carregar, transicionar, salvar — e agora, falar com o matching.
  */
 @Injectable()
 export class TripUseCases {
-  constructor(@Inject(TRIP_REPOSITORY) private readonly trips: TripRepository) {}
+  constructor(
+    @Inject(TRIP_REPOSITORY) private readonly trips: TripRepository,
+    @Inject(DRIVER_AVAILABILITY) private readonly availability: DriverAvailability,
+    @Inject(MATCHING_STRATEGY) private readonly strategy: MatchingStrategy,
+  ) {}
 
-  async request(riderId: string): Promise<{ id: string }> {
+  /**
+   * Matching sincrono: a resposta ja diz se achou motorista. Sem motorista livre,
+   * a corrida fica `requested` e ninguem tenta de novo (o "burro" do roteiro —
+   * fila e nova tentativa chegam com eventos, na Etapa 4).
+   */
+  async request(riderId: string): Promise<TripSnapshot> {
     const trip = Trip.request(riderId);
-    await this.trips.save(trip);
-    return { id: trip.id };
-  }
+    const driverId = await this.claimDriver();
+    if (driverId) {
+      trip.accept(driverId);
+    }
 
-  accept(id: string, driverId: string): Promise<TripSnapshot> {
-    return this.apply(id, (trip) => trip.accept(driverId));
+    try {
+      await this.trips.save(trip);
+    } catch (error) {
+      // A corrida nao foi gravada, mas o motorista ja estava reservado para ela.
+      // Desfaz a reserva; senao ele some da fila ate ficar online de novo.
+      if (driverId) {
+        await this.availability.release(driverId);
+      }
+      throw error;
+    }
+
+    return trip.toSnapshot();
   }
 
   start(id: string): Promise<TripSnapshot> {
     return this.apply(id, (trip) => trip.start());
   }
 
-  finish(id: string): Promise<TripSnapshot> {
-    return this.apply(id, (trip) => trip.finish());
+  async finish(id: string): Promise<TripSnapshot> {
+    const trip = await this.apply(id, (t) => t.finish());
+    await this.freeDriver(trip);
+    return trip;
   }
 
-  cancel(id: string): Promise<TripSnapshot> {
-    return this.apply(id, (trip) => trip.cancel());
+  async cancel(id: string): Promise<TripSnapshot> {
+    const trip = await this.apply(id, (t) => t.cancel());
+    await this.freeDriver(trip);
+    return trip;
   }
 
   async get(id: string): Promise<TripSnapshot> {
     return (await this.load(id)).toSnapshot();
   }
 
+  /**
+   * Escolhe (Strategy) e reserva (claim). Entre listar e reservar ha um `await`,
+   * e nesse intervalo outro pedido pode ter reservado o mesmo motorista. Nesse caso
+   * o claim devolve false e tentamos o proximo da lista.
+   */
+  private async claimDriver(): Promise<string | null> {
+    let candidates = await this.availability.listAvailable();
+    while (candidates.length > 0) {
+      const chosen = this.strategy.choose(candidates);
+      if (chosen === null) {
+        return null;
+      }
+      if (await this.availability.claim(chosen)) {
+        return chosen;
+      }
+      candidates = candidates.filter((id) => id !== chosen);
+    }
+    return null;
+  }
+
+  private async freeDriver(trip: TripSnapshot): Promise<void> {
+    if (trip.driverId) {
+      await this.availability.release(trip.driverId);
+    }
+  }
+
   // ponytail: load -> transiciona -> save sem trava. Duas requests simultaneas
-  // (ex.: accept e cancel na mesma corrida) podem ler o mesmo estado e a ultima
-  // escrita vence. Concorrencia e assunto da Etapa 4 (lock / versao otimista).
+  // na mesma corrida podem ler o mesmo estado e a ultima escrita vence.
+  // Concorrencia e assunto da Etapa 4 (lock / versao otimista).
   private async apply(id: string, transition: (trip: Trip) => void): Promise<TripSnapshot> {
     const trip = await this.load(id);
     transition(trip);
