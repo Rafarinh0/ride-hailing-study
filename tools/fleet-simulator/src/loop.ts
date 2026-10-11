@@ -19,9 +19,23 @@ export interface Stats {
   /** Envio pulado porque o anterior do mesmo motorista ainda nao tinha voltado. */
   skipped: number;
   totalLatencyMs: number;
+  /** Motivo da ultima falha da janela: sem isso, "falhas 1238" nao diz o que fazer. */
+  lastError?: string;
 }
 
-export const emptyStats = (): Stats => ({ ok: 0, failed: 0, skipped: 0, totalLatencyMs: 0 });
+export const emptyStats = (): Stats => ({ ok: 0, failed: 0, skipped: 0, totalLatencyMs: 0, lastError: undefined });
+
+/** O fetch embrulha erro de rede: o codigo util (ECONNREFUSED...) fica em `cause`. */
+export function describeError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  if (error.name === 'TimeoutError') {
+    return 'sem resposta dentro do limite de tempo';
+  }
+  const code = (error.cause as { code?: string } | undefined)?.code;
+  return code ?? error.message;
+}
 
 /**
  * Um motorista do simulador. Cada `tick` anda o equivalente a um intervalo e manda a
@@ -54,8 +68,9 @@ export function driverLoop(initial: SimDriver, deps: { area: Area; intervalMs: n
             deps.stats.ok++;
             deps.stats.totalLatencyMs += performance.now() - startedAt;
           },
-          () => {
+          (error) => {
             deps.stats.failed++;
+            deps.stats.lastError = describeError(error);
           },
         )
         .finally(() => {

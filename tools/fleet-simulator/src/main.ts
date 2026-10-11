@@ -63,9 +63,10 @@ const reporter = setInterval(() => {
   elapsedS += REPORT_EVERY_MS / 1000;
   const seconds = REPORT_EVERY_MS / 1000;
   const avgMs = stats.ok ? (stats.totalLatencyMs / stats.ok).toFixed(1) : '-';
+  const why = stats.lastError ? ` (${stats.lastError})` : '';
   console.log(
     `[${String(elapsedS).padStart(4)}s] ok ${(stats.ok / seconds).toFixed(0).padStart(5)}/s | ` +
-      `falhas ${stats.failed} | pulados ${stats.skipped} | latencia media ${avgMs} ms`,
+      `falhas ${stats.failed}${why} | pulados ${stats.skipped} | latencia media ${avgMs} ms`,
   );
   Object.assign(stats, emptyStats()); // zera no lugar: todos os motoristas apontam para este objeto
 }, REPORT_EVERY_MS);

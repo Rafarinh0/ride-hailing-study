@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFleet } from './driver';
 import { areaAround } from './geo';
-import { driverLoop, emptyStats, Reading } from './loop';
+import { describeError, driverLoop, emptyStats, Reading } from './loop';
 import { seededRng } from './random';
 
 const area = areaAround({ lat: -23.5505, lng: -46.6333 }, 5_000);
@@ -60,6 +60,17 @@ describe('driverLoop', () => {
     loop.tick();
     await flush();
 
-    expect(stats).toMatchObject({ ok: 0, failed: 2, skipped: 0 });
+    expect(stats).toMatchObject({ ok: 0, failed: 2, skipped: 0, lastError: 'HTTP 500' });
+  });
+});
+
+describe('describeError', () => {
+  it('erro de rede do fetch mostra o codigo que vem em cause', () => {
+    const refused = new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+    expect(describeError(refused)).toBe('ECONNREFUSED');
+  });
+
+  it('timeout vira uma frase legivel', () => {
+    expect(describeError(new DOMException('aborted', 'TimeoutError'))).toBe('sem resposta dentro do limite de tempo');
   });
 });
