@@ -5,7 +5,7 @@ import { PostgresPositionStore } from './infrastructure/postgres-position-store'
 
 async function main() {
   const env = loadEnv();
-  const app = buildApp({ store: new PostgresPositionStore(createDatabase(env.DATABASE_URL)) });
+  const app = buildApp({ store: new PostgresPositionStore(createDatabase(env.DATABASE_URL, env.DB_POOL_MAX)) });
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
 }
 

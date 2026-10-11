@@ -4,7 +4,10 @@ import * as schema from './schema';
 
 export type Database = ReturnType<typeof createDatabase>;
 
-/** Pool do postgres.js: ate 10 conexoes por padrao. Numero que a Milestone 3 vai medir. */
-export function createDatabase(url: string) {
-  return drizzle(postgres(url), { schema });
+/**
+ * `maxConnections` e o tamanho do pool: quantas queries podem estar no Postgres ao
+ * mesmo tempo. As demais esperam na fila do postgres.js.
+ */
+export function createDatabase(url: string, maxConnections = 10) {
+  return drizzle(postgres(url, { max: maxConnections }), { schema });
 }
