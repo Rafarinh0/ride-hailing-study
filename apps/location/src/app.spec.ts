@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from './app';
-import { DriverPosition } from './domain/position';
+import { distanceMeters, DriverPosition, NearbyDriver, Position } from './domain/position';
 import { PositionStore } from './ports/position-store';
 
 const DRIVER = '22222222-2222-4222-8222-222222222222';
@@ -15,6 +15,13 @@ class FakeStore implements PositionStore {
   }
   async find(driverId: string) {
     return this.saved.filter((r) => r.driverId === driverId).at(-1) ?? null;
+  }
+  async findNearby(center: Position, radius: number, limit: number): Promise<NearbyDriver[]> {
+    return this.saved
+      .map((r) => ({ ...r, distanceMeters: distanceMeters(center, r.position) }))
+      .filter((r) => r.distanceMeters <= radius)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, limit);
   }
 }
 
@@ -56,6 +63,24 @@ describe('location HTTP', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe(error);
     expect(store.saved).toHaveLength(0);
+  });
+
+  it('GET /drivers/nearby devolve os proximos com a distancia em metros', async () => {
+    await post({ lat: -23.55, lng: -46.63, recordedAt: '2026-01-01T11:59:58Z' });
+    const res = await app.inject({ method: 'GET', url: '/drivers/nearby?lat=-23.551&lng=-46.63' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().drivers).toEqual([
+      expect.objectContaining({ driverId: DRIVER, distanceMeters: 111 }), // 0,001 grau de latitude
+    ]);
+  });
+
+  it.each([
+    ['sem lat', '/drivers/nearby?lng=0'],
+    ['raio acima do teto', '/drivers/nearby?lat=0&lng=0&radius=60000'],
+    ['limite zero', '/drivers/nearby?lat=0&lng=0&limit=0'],
+    ['latitude impossivel', '/drivers/nearby?lat=95&lng=0'],
+  ])('nearby %s -> 400', async (_label, url) => {
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(400);
   });
 
   it('id que nao e uuid -> 400', async () => {

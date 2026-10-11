@@ -1,0 +1,74 @@
+{
+  "id": "d82c1ccd-a324-4063-ac04-d341f6576068",
+  "prevId": "164fd1e0-5c38-4377-9d34-ca4358f4e6ef",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "location.driver_positions": {
+      "name": "driver_positions",
+      "schema": "location",
+      "columns": {
+        "driver_id": {
+          "name": "driver_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lat": {
+          "name": "lat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lng": {
+          "name": "lng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "driver_positions_point_idx": {
+          "name": "driver_positions_point_idx",
+          "columns": [
+            {
+              "expression": "point(\"lng\", \"lat\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "location": "location"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

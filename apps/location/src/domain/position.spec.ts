@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidPositionError } from './errors';
-import { driverPosition, MAX_CLOCK_SKEW_MS, Position } from './position';
+import { distanceMeters, driverPosition, MAX_CLOCK_SKEW_MS, Position } from './position';
 
 describe('Position', () => {
   it('aceita os limites', () => {
@@ -14,6 +14,18 @@ describe('Position', () => {
     [0, Number.POSITIVE_INFINITY],
   ])('rejeita (%s, %s)', (lat, lng) => {
     expect(() => Position.create(lat, lng)).toThrow(InvalidPositionError);
+  });
+});
+
+describe('distanceMeters', () => {
+  it('1 grau de latitude vale ~111,2 km', () => {
+    expect(distanceMeters(Position.create(0, 0), Position.create(1, 0))).toBeCloseTo(111_226, 0);
+  });
+
+  it('um grau de longitude encolhe longe do equador', () => {
+    const atSaoPaulo = distanceMeters(Position.create(-23.55, -46.63), Position.create(-23.55, -45.63));
+    expect(atSaoPaulo).toBeGreaterThan(101_000);
+    expect(atSaoPaulo).toBeLessThan(102_500);
   });
 });
 

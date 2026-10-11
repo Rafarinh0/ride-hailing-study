@@ -1,0 +1,1 @@
+CREATE INDEX "driver_positions_point_idx" ON "location"."driver_positions" USING gist (point("lng", "lat"));

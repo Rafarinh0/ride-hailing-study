@@ -18,6 +18,18 @@ export class Position {
   }
 }
 
+/** Mesmo raio da Terra que o Redis GEO usa: as duas implementacoes medem igual. */
+export const EARTH_RADIUS_M = 6372797.560856;
+
+/** Distancia pela superficie da esfera (formula de haversine), em metros. */
+export function distanceMeters(a: Position, b: Position): number {
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const h =
+    Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
 /**
  * Tolerancia para relogio adiantado no celular. Sem limite, uma leitura com data no
  * futuro viraria a "mais nova" para sempre e congelaria a posicao do motorista: toda
@@ -30,6 +42,11 @@ export interface DriverPosition {
   readonly driverId: string;
   readonly position: Position;
   readonly recordedAt: Date;
+}
+
+/** Resultado da busca por proximidade: a leitura e a distancia ate o ponto buscado. */
+export interface NearbyDriver extends DriverPosition {
+  readonly distanceMeters: number;
 }
 
 export function driverPosition(

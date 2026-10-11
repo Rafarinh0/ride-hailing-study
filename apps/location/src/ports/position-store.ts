@@ -1,8 +1,8 @@
-import { DriverPosition } from '../domain/position';
+import { DriverPosition, NearbyDriver, Position } from '../domain/position';
 
 /**
- * Onde fica a posicao atual de cada motorista. Porta porque a troca ja esta no
- * roteiro: Postgres agora, Redis GEO depois de medir (Milestone 4).
+ * Onde fica a posicao atual de cada motorista. Duas implementacoes (Postgres e
+ * Redis) passam no mesmo teste de contrato: test/position-store.contract.ts.
  */
 export interface PositionStore {
   /**
@@ -11,4 +11,6 @@ export interface PositionStore {
    */
   save(reading: DriverPosition): Promise<boolean>;
   find(driverId: string): Promise<DriverPosition | null>;
+  /** Motoristas a ate `radiusMeters` de `center`, do mais perto ao mais longe, no maximo `limit`. */
+  findNearby(center: Position, radiusMeters: number, limit: number): Promise<NearbyDriver[]>;
 }

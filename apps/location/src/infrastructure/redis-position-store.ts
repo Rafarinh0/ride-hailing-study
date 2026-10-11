@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 import { InvalidPositionError } from '../domain/errors';
-import { DriverPosition, Position } from '../domain/position';
+import { DriverPosition, NearbyDriver, Position } from '../domain/position';
 import { PositionStore } from '../ports/position-store';
 
 // As chaves compartilham o trecho entre chaves ({drivers}): num Redis Cluster isso
@@ -45,9 +45,7 @@ export class RedisPositionStore implements PositionStore {
 
   async save(reading: DriverPosition): Promise<boolean> {
     const { lat, lng } = reading.position;
-    if (Math.abs(lat) > REDIS_MAX_LAT) {
-      throw new InvalidPositionError(`latitude fora da area suportada (+-${REDIS_MAX_LAT}): ${lat}`);
-    }
+    assertSupported(lat);
     const written = await this.redis.saveIfNewer(
       GEO_KEY,
       RECORDED_AT_KEY,
@@ -74,5 +72,35 @@ export class RedisPositionStore implements PositionStore {
       position: Position.create(Number(point[1]), Number(point[0])),
       recordedAt: new Date(Number(recordedAt)),
     };
+  }
+
+  /**
+   * GEOSEARCH percorre as celulas de geohash que cobrem o circulo, ja devolve a
+   * distancia (haversine) e ordena. A hora de cada leitura vem do hash, num segundo
+   * comando: sem atomicidade, mas e so leitura.
+   */
+  async findNearby(center: Position, radiusMeters: number, limit: number): Promise<NearbyDriver[]> {
+    assertSupported(center.lat);
+    const found = (await this.redis.call(
+      'GEOSEARCH', GEO_KEY, 'FROMLONLAT', center.lng, center.lat,
+      'BYRADIUS', radiusMeters, 'm', 'ASC', 'COUNT', limit, 'WITHDIST', 'WITHCOORD',
+    )) as [string, string, [string, string]][];
+    if (found.length === 0) {
+      return [];
+    }
+
+    const times = await this.redis.hmget(RECORDED_AT_KEY, ...found.map(([id]) => id));
+    return found.map(([id, distance, [lng, lat]], i) => ({
+      driverId: id,
+      position: Position.create(Number(lat), Number(lng)),
+      recordedAt: new Date(Number(times[i])),
+      distanceMeters: Number(distance),
+    }));
+  }
+}
+
+function assertSupported(lat: number): void {
+  if (Math.abs(lat) > REDIS_MAX_LAT) {
+    throw new InvalidPositionError(`latitude fora da area suportada (+-${REDIS_MAX_LAT}): ${lat}`);
   }
 }
